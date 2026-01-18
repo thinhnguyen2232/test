@@ -1,1 +1,322 @@
+name: Project 1 SQL Autograder
 
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  grade:
+    name: Test & Grade SQL Assignment
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout student repository
+        uses: actions/checkout@v4
+        with:
+          path: student-repo
+
+      - name: Check instructor token (student-friendly message)
+        env:
+          INSTRUCTOR_TESTS_TOKEN: ${{ secrets.INSTRUCTOR_TESTS_TOKEN }}
+        run: |
+          cd student-repo
+          ./.github/scripts/check_instructor_token.sh
+
+      - name: Checkout private test repository (project1-instructor-tests)
+        uses: actions/checkout@v4
+        with:
+          repository: SOC-CS3550/project1-instructor-tests
+          token: ${{ secrets.INSTRUCTOR_TESTS_TOKEN }}
+          path: project1-instructor-tests
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Copy test files from instructor repo
+        run: |
+          echo "📦 Copying test files..."
+          rm -rf student-repo/tests
+          cp -r project1-instructor-tests/tests student-repo/
+          echo "✅ Test files copied"
+          echo "📋 Test files in student-repo:"
+          ls -la student-repo/tests/
+
+      - name: Start Docker Compose services (from student repo)
+        working-directory: student-repo
+        run: |
+          echo "🐳 Starting Docker Compose services..."
+          docker compose up -d
+          echo "✅ Docker Compose services started"
+
+      - name: Wait for MySQL to be ready
+        working-directory: student-repo
+        run: |
+          echo "⏳ Waiting for MySQL to be ready..."
+          for i in {1..60}; do
+            if docker compose exec -T mysql mysqladmin ping -h localhost -uroot -ppassword &> /dev/null; then
+              echo "✅ MySQL is ready!"
+              sleep 2
+              exit 0
+            fi
+            echo "Waiting for MySQL to be ready... ($i/60)"
+            sleep 2
+          done
+          echo "❌ MySQL failed to start"
+          docker compose logs mysql
+          exit 1
+
+      - name: Setup database
+        working-directory: student-repo
+        run: |
+          echo "🗄️ Setting up database..."
+          docker compose exec -T mysql mysql -uroot -ppassword < src/02_schema_design.sql
+          docker compose exec -T mysql mysql -uroot -ppassword < src/03_sample_data.sql
+          echo "✅ Database setup complete"
+
+      - name: Verify database setup
+        working-directory: student-repo
+        run: |
+          echo "🔍 Verifying database setup..."
+          docker compose exec -T mysql mysql -uroot -ppassword community_college_db -e "SHOW TABLES;"
+          echo "✅ Database verified"
+
+      - name: Debug - Check test files in container
+        working-directory: student-repo
+        run: |
+          echo "🔍 Checking test files in container..."
+          docker compose run --rm test-runner ls -la /workspace/tests/ || echo "Tests directory not found in container"
+
+      - name: Run Task 2 tests (Basic Queries - 20 points)
+        id: task2
+        continue-on-error: true
+        working-directory: student-repo
+        run: |
+          echo "📝 Running Task 2: Basic Queries..."
+          set +e
+          docker compose run --rm -e TEST_MODE=student test-runner node /workspace/tests/validate_basic_queries.js > task2_output.txt 2>&1
+          cat task2_output.txt
+          
+          # Extract passed/total from output (format: "📋 Results: X/Y queries passed")
+          if grep -q "Results:" task2_output.txt; then
+            PASSED=$(grep "Results:" task2_output.txt | sed -n 's/.*Results: \([0-9]*\)\/[0-9]* queries passed.*/\1/p')
+            TOTAL=$(grep "Results:" task2_output.txt | sed -n 's/.*Results: [0-9]*\/\([0-9]*\) queries passed.*/\1/p')
+            echo "passed=${PASSED:-0}" >> $GITHUB_OUTPUT
+            echo "total=${TOTAL:-5}" >> $GITHUB_OUTPUT
+          else
+            echo "passed=0" >> $GITHUB_OUTPUT
+            echo "total=5" >> $GITHUB_OUTPUT
+          fi
+          exit 0
+
+      - name: Run Task 3 tests (Intermediate Queries - 20 points)
+        id: task3
+        continue-on-error: true
+        working-directory: student-repo
+        run: |
+          echo "🔗 Running Task 3: Intermediate Queries..."
+          set +e
+          docker compose run --rm -e TEST_MODE=student test-runner node /workspace/tests/validate_intermediate_queries.js > task3_output.txt 2>&1
+          cat task3_output.txt
+          
+          if grep -q "Results:" task3_output.txt; then
+            PASSED=$(grep "Results:" task3_output.txt | sed -n 's/.*Results: \([0-9]*\)\/[0-9]* queries passed.*/\1/p')
+            TOTAL=$(grep "Results:" task3_output.txt | sed -n 's/.*Results: [0-9]*\/\([0-9]*\) queries passed.*/\1/p')
+            echo "passed=${PASSED:-0}" >> $GITHUB_OUTPUT
+            echo "total=${TOTAL:-5}" >> $GITHUB_OUTPUT
+          else
+            echo "passed=0" >> $GITHUB_OUTPUT
+            echo "total=5" >> $GITHUB_OUTPUT
+          fi
+          exit 0
+
+      - name: Run Task 4 tests (Advanced Queries - 20 points)
+        id: task4
+        continue-on-error: true
+        working-directory: student-repo
+        run: |
+          echo "🚀 Running Task 4: Advanced Queries..."
+          set +e
+          docker compose run --rm -e TEST_MODE=student test-runner node /workspace/tests/validate_advanced_queries.js > task4_output.txt 2>&1
+          cat task4_output.txt
+          
+          if grep -q "Results:" task4_output.txt; then
+            PASSED=$(grep "Results:" task4_output.txt | sed -n 's/.*Results: \([0-9]*\)\/[0-9]* queries passed.*/\1/p')
+            TOTAL=$(grep "Results:" task4_output.txt | sed -n 's/.*Results: [0-9]*\/\([0-9]*\) queries passed.*/\1/p')
+            echo "passed=${PASSED:-0}" >> $GITHUB_OUTPUT
+            echo "total=${TOTAL:-5}" >> $GITHUB_OUTPUT
+          else
+            echo "passed=0" >> $GITHUB_OUTPUT
+            echo "total=5" >> $GITHUB_OUTPUT
+          fi
+          exit 0
+
+      - name: Run Task 5 tests (Subqueries and CTEs - 20 points)
+        id: task5
+        continue-on-error: true
+        working-directory: student-repo
+        run: |
+          echo "🔍 Running Task 5: Subqueries and CTEs..."
+          set +e
+          docker compose run --rm -e TEST_MODE=student test-runner node /workspace/tests/validate_subqueries_ctes.js > task5_output.txt 2>&1
+          cat task5_output.txt
+          
+          if grep -q "Results:" task5_output.txt; then
+            PASSED=$(grep "Results:" task5_output.txt | sed -n 's/.*Results: \([0-9]*\)\/[0-9]* queries passed.*/\1/p')
+            TOTAL=$(grep "Results:" task5_output.txt | sed -n 's/.*Results: [0-9]*\/\([0-9]*\) queries passed.*/\1/p')
+            echo "passed=${PASSED:-0}" >> $GITHUB_OUTPUT
+            echo "total=${TOTAL:-5}" >> $GITHUB_OUTPUT
+          else
+            echo "passed=0" >> $GITHUB_OUTPUT
+            echo "total=5" >> $GITHUB_OUTPUT
+          fi
+          exit 0
+
+      - name: Run Task 6 tests (Advanced Techniques - BONUS 10 points)
+        id: task6
+        continue-on-error: true
+        working-directory: student-repo
+        run: |
+          echo "💎 Running Task 6: Advanced Techniques (Bonus)..."
+          set +e
+          docker compose run --rm -e TEST_MODE=student test-runner node /workspace/tests/validate_advanced_techniques.js > task6_output.txt 2>&1
+          cat task6_output.txt
+          
+          if grep -q "Results:" task6_output.txt; then
+            PASSED=$(grep "Results:" task6_output.txt | sed -n 's/.*Results: \([0-9]*\)\/[0-9]* queries passed.*/\1/p')
+            TOTAL=$(grep "Results:" task6_output.txt | sed -n 's/.*Results: [0-9]*\/\([0-9]*\) queries passed.*/\1/p')
+            echo "passed=${PASSED:-0}" >> $GITHUB_OUTPUT
+            echo "total=${TOTAL:-5}" >> $GITHUB_OUTPUT
+          else
+            echo "passed=0" >> $GITHUB_OUTPUT
+            echo "total=5" >> $GITHUB_OUTPUT
+          fi
+          exit 0
+
+      - name: Calculate grade
+        if: always()
+        run: |
+          echo "🎓 Calculating final grade..."
+          
+          # Task 2: Basic Queries (20 points, 5 queries)
+          TASK2_PASSED=${{ steps.task2.outputs.passed }}
+          TASK2_TOTAL=${{ steps.task2.outputs.total }}
+          TASK2_POINTS=$(awk "BEGIN {printf \"%.0f\", ($TASK2_PASSED / $TASK2_TOTAL) * 20}")
+          
+          # Task 3: Intermediate Queries (20 points, 5 queries)
+          TASK3_PASSED=${{ steps.task3.outputs.passed }}
+          TASK3_TOTAL=${{ steps.task3.outputs.total }}
+          TASK3_POINTS=$(awk "BEGIN {printf \"%.0f\", ($TASK3_PASSED / $TASK3_TOTAL) * 20}")
+          
+          # Task 4: Advanced Queries (20 points, 5 queries)
+          TASK4_PASSED=${{ steps.task4.outputs.passed }}
+          TASK4_TOTAL=${{ steps.task4.outputs.total }}
+          TASK4_POINTS=$(awk "BEGIN {printf \"%.0f\", ($TASK4_PASSED / $TASK4_TOTAL) * 20}")
+          
+          # Task 5: Subqueries & CTEs (20 points, 5 queries)
+          TASK5_PASSED=${{ steps.task5.outputs.passed }}
+          TASK5_TOTAL=${{ steps.task5.outputs.total }}
+          TASK5_POINTS=$(awk "BEGIN {printf \"%.0f\", ($TASK5_PASSED / $TASK5_TOTAL) * 20}")
+          
+          # Task 6: Advanced Techniques - Bonus (10 points, 5 queries)
+          TASK6_PASSED=${{ steps.task6.outputs.passed }}
+          TASK6_TOTAL=${{ steps.task6.outputs.total }}
+          TASK6_POINTS=$(awk "BEGIN {printf \"%.0f\", ($TASK6_PASSED / $TASK6_TOTAL) * 10}")
+          
+          TOTAL=$((TASK2_POINTS + TASK3_POINTS + TASK4_POINTS + TASK5_POINTS))
+          
+          echo ""
+          echo "📊 Grade Breakdown:"
+          echo "Task 2 (Basic Queries): ${TASK2_POINTS}/20 (${TASK2_PASSED}/${TASK2_TOTAL} queries)"
+          echo "Task 3 (Intermediate Queries): ${TASK3_POINTS}/20 (${TASK3_PASSED}/${TASK3_TOTAL} queries)"
+          echo "Task 4 (Advanced Queries): ${TASK4_POINTS}/20 (${TASK4_PASSED}/${TASK4_TOTAL} queries)"
+          echo "Task 5 (Subqueries & CTEs): ${TASK5_POINTS}/20 (${TASK5_PASSED}/${TASK5_TOTAL} queries)"
+          echo "Task 6 (Advanced Techniques - Bonus): ${TASK6_POINTS}/10 (${TASK6_PASSED}/${TASK6_TOTAL} queries)"
+          echo ""
+          echo "📈 Total Core Score: ${TOTAL}/80"
+          echo "🎁 Bonus Points: ${TASK6_POINTS}/10"
+          echo "🎯 Final Score: $((TOTAL + TASK6_POINTS))/90"
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          # Calculate points for each task
+          TASK2_PASSED=${{ steps.task2.outputs.passed }}
+          TASK2_TOTAL=${{ steps.task2.outputs.total }}
+          TASK2_POINTS=$(awk "BEGIN {printf \"%.0f\", ($TASK2_PASSED / $TASK2_TOTAL) * 20}")
+          
+          TASK3_PASSED=${{ steps.task3.outputs.passed }}
+          TASK3_TOTAL=${{ steps.task3.outputs.total }}
+          TASK3_POINTS=$(awk "BEGIN {printf \"%.0f\", ($TASK3_PASSED / $TASK3_TOTAL) * 20}")
+          
+          TASK4_PASSED=${{ steps.task4.outputs.passed }}
+          TASK4_TOTAL=${{ steps.task4.outputs.total }}
+          TASK4_POINTS=$(awk "BEGIN {printf \"%.0f\", ($TASK4_PASSED / $TASK4_TOTAL) * 20}")
+          
+          TASK5_PASSED=${{ steps.task5.outputs.passed }}
+          TASK5_TOTAL=${{ steps.task5.outputs.total }}
+          TASK5_POINTS=$(awk "BEGIN {printf \"%.0f\", ($TASK5_PASSED / $TASK5_TOTAL) * 20}")
+          
+          TASK6_PASSED=${{ steps.task6.outputs.passed }}
+          TASK6_TOTAL=${{ steps.task6.outputs.total }}
+          TASK6_POINTS=$(awk "BEGIN {printf \"%.0f\", ($TASK6_PASSED / $TASK6_TOTAL) * 10}")
+          
+          TOTAL=$((TASK2_POINTS + TASK3_POINTS + TASK4_POINTS + TASK5_POINTS))
+          
+          echo "## 📊 Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Task | Queries Passed | Points Earned |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|----------------|---------------|" >> $GITHUB_STEP_SUMMARY
+          
+          # Determine status emoji
+          [ "$TASK2_PASSED" = "$TASK2_TOTAL" ] && TASK2_STATUS="✅" || TASK2_STATUS="⚠️"
+          [ "$TASK3_PASSED" = "$TASK3_TOTAL" ] && TASK3_STATUS="✅" || TASK3_STATUS="⚠️"
+          [ "$TASK4_PASSED" = "$TASK4_TOTAL" ] && TASK4_STATUS="✅" || TASK4_STATUS="⚠️"
+          [ "$TASK5_PASSED" = "$TASK5_TOTAL" ] && TASK5_STATUS="✅" || TASK5_STATUS="⚠️"
+          [ "$TASK6_PASSED" = "$TASK6_TOTAL" ] && TASK6_STATUS="✅" || TASK6_STATUS="⚠️"
+          
+          [ "$TASK2_PASSED" = "0" ] && TASK2_STATUS="❌"
+          [ "$TASK3_PASSED" = "0" ] && TASK3_STATUS="❌"
+          [ "$TASK4_PASSED" = "0" ] && TASK4_STATUS="❌"
+          [ "$TASK5_PASSED" = "0" ] && TASK5_STATUS="❌"
+          [ "$TASK6_PASSED" = "0" ] && TASK6_STATUS="❌"
+          
+          echo "| ${TASK2_STATUS} Task 2: Basic Queries | ${TASK2_PASSED}/${TASK2_TOTAL} | ${TASK2_POINTS}/20 |" >> $GITHUB_STEP_SUMMARY
+          echo "| ${TASK3_STATUS} Task 3: Intermediate Queries | ${TASK3_PASSED}/${TASK3_TOTAL} | ${TASK3_POINTS}/20 |" >> $GITHUB_STEP_SUMMARY
+          echo "| ${TASK4_STATUS} Task 4: Advanced Queries | ${TASK4_PASSED}/${TASK4_TOTAL} | ${TASK4_POINTS}/20 |" >> $GITHUB_STEP_SUMMARY
+          echo "| ${TASK5_STATUS} Task 5: Subqueries & CTEs | ${TASK5_PASSED}/${TASK5_TOTAL} | ${TASK5_POINTS}/20 |" >> $GITHUB_STEP_SUMMARY
+          echo "| ${TASK6_STATUS} Task 6: Advanced Techniques (Bonus) | ${TASK6_PASSED}/${TASK6_TOTAL} | +${TASK6_POINTS}/10 |" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**📈 Total Core Score: ${TOTAL}/80**" >> $GITHUB_STEP_SUMMARY
+          echo "**🎁 Bonus Points: ${TASK6_POINTS}/10**" >> $GITHUB_STEP_SUMMARY
+          echo "**🎯 Final Score: $((TOTAL + TASK6_POINTS))/90**" >> $GITHUB_STEP_SUMMARY
+
+      - name: Cleanup
+        if: always()
+        working-directory: student-repo
+        run: |
+          echo "🧹 Cleaning up Docker services..."
+          docker compose down -v
+          echo "✅ Cleanup complete"
