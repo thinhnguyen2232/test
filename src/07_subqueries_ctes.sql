@@ -1,8 +1,7 @@
-
--- Assignment 1: Subqueries and Common Table Expressions (CTEs)
+-- Assignment 1: Basic Queries  
 -- CS3550 - Advanced Database Systems
--- Student Name: [Your Name]
--- Date: [Date]
+-- Student Name: [Thinh Nguyen]
+-- Date: [01/17/2026]
 -- Database: MySQL 8.0
 
 -- =============================================================================
