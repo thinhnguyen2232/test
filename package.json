@@ -1,0 +1,41 @@
+{
+    "name": "cs3550-assignment1-instructor-tests",
+    "version": "1.0.0",
+    "description": "Private test suite for CS3550 Assignment 1 - Community College Database",
+    "main": "index.js",
+    "scripts": {
+        "test": "npm run test:core",
+        "test:core": "npm run test:schema && npm run test:data && npm run test:basic && npm run test:intermediate && npm run test:advanced && npm run test:performance",
+        "test:bonus": "npm run test:subqueries && npm run test:techniques && npm run test:bonus-features",
+        "test:schema": "node tests/private/validate_schema_requirements.js",
+        "test:data": "node tests/private/validate_data_volume.js",
+        "test:basic": "node tests/private/validate_basic_queries.js",
+        "test:intermediate": "node tests/private/validate_intermediate_queries.js",
+        "test:advanced": "node tests/private/validate_advanced_queries.js",
+        "test:subqueries": "node tests/private/validate_subqueries_ctes.js",
+        "test:techniques": "node tests/private/validate_advanced_techniques.js",
+        "test:bonus-features": "node tests/private/validate_bonus.js",
+        "test:performance": "node tests/private/validate_performance.js",
+        "test:all": "npm run test:core && npm run test:bonus"
+    },
+    "keywords": [
+        "database",
+        "sql",
+        "mysql",
+        "education",
+        "cs3550",
+        "private-tests",
+        "instructor"
+    ],
+    "author": "CS3550 Course Staff",
+    "license": "MIT",
+    "dependencies": {
+        "mysql2": "^3.6.0"
+    },
+    "devDependencies": {
+        "jest": "^29.7.0"
+    },
+    "engines": {
+        "node": ">=16.0.0"
+    }
+}
