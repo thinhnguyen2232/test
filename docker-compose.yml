@@ -1,0 +1,63 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-cs3550-instructor
+    command: --default-authentication-plugin=mysql_native_password --skip-ssl
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: community_college_db
+      MYSQL_USER: student
+      MYSQL_PASSWORD: student123
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./src:/workspace/src:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+    tmpfs:
+      - /var/lib/mysql
+
+  test-runner:
+    image: node:18-alpine
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=password
+      - MYSQL_DATABASE=community_college_db
+      - STUDENT_REPO_PATH=/workspace/src
+    volumes:
+      - ./tests:/workspace/tests:ro
+      - ./src:/workspace/src:ro
+      - ./package.json:/workspace/package.json:ro
+      - ./package-lock.json:/workspace/package-lock.json:rw
+      - ./node_modules:/workspace/node_modules:rw
+    working_dir: /workspace
+    command: sh -c "npm install && npm run test:all"
+
+  app:
+    image: node:18-alpine
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=password
+      - MYSQL_DATABASE=community_college_db
+      - STUDENT_REPO_PATH=/workspace/src
+    volumes:
+      - ./tests:/workspace/tests
+      - ./src:/workspace/src:ro
+      - ./package.json:/workspace/package.json
+      - ./package-lock.json:/workspace/package-lock.json
+    working_dir: /workspace
+    command: sh -c "npm install && tail -f /dev/null"
+    stdin_open: true
+    tty: true
